@@ -57,15 +57,15 @@ class AudioFile(models.Model):
     def __str__(self):
         return self.title
 
-# class PTZControlHistory(models.Model):
-#     timestamp = models.DateTimeField(auto_now_add=True)
-#     pan = models.FloatField()
-#     tilt = models.FloatField()
-#     zoom = models.FloatField()
+class PTZControlHistory(models.Model):
+    timestamp = models.DateTimeField(auto_now_add=True)
+    pan = models.FloatField()
+    tilt = models.FloatField()
+    zoom = models.FloatField()
 
-#     @classmethod
-#     def create_history_entry(cls, pan, tilt, zoom):
-#         return cls.objects.create(pan=pan, tilt=tilt, zoom=zoom)
+    @classmethod
+    def create_history_entry(cls, pan, tilt, zoom):
+        return cls.objects.create(pan=pan, tilt=tilt, zoom=zoom)
 
 
     

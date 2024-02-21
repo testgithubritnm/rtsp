@@ -4,22 +4,14 @@ from django.views import View
 from onvif import ONVIFCamera
 from zeep import Client
 from onvif.exceptions import ONVIFError
-from django.views import View
-from zeep import Client
 # from django.shortcuts import rend
-from django.views import View
 from django.http import StreamingHttpResponse
 from django.views.decorators import gzip
-from onvif import ONVIFCamera
-
 from onvif import ONVIFService
 import cv2
 import numpy as np
-
 import traceback
 from django.http import HttpResponse
-from onvif.exceptions import ONVIFError
-from django.shortcuts import render
 from django.template.loader import render_to_string
 from django.conf import settings
 from zeep import Client
@@ -34,7 +26,6 @@ from .models import Camera
 import urllib
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from .serializers import CameraSerializer
 from django.shortcuts import get_object_or_404
@@ -42,25 +33,19 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from onvif import ONVIFCamera
-
 # from myapp.models import ONVIFDevice  
 from django.utils.decorators import method_decorator
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.http import HttpResponse, StreamingHttpResponse, HttpResponseNotAllowed
-from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
 from django.views import View
-from onvif import ONVIFCamera
 from wsdiscovery.discovery import ThreadedWSDiscovery as WSDiscovery
 from wsdiscovery import Scope
 import re
 import logging
 from zeep import Client
-from zeep.transports import Transport
 from .models import Camera, Certificate
 from onvif.exceptions import ONVIFError
-from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
 
 
@@ -128,33 +113,47 @@ from django.views.decorators import gzip
 # Import OpenCV module
 import cv2
 
-
+# Function to generate frames from camera feed
 def gen_frames():
     # Open the default camera (0)
     # cap = cv2.VideoCapture('rtsp://192.168.29.53:8080/h264_ulaw.sdp')
     cap = cv2.VideoCapture('rtsp://admin:test123!@192.168.29.217:554/cam/realmonitor?channel=1&subtype=0')
   
+    
+    # Loop to continuously read frames from the camera
     while True:
-       ret, frame = cap.read()
+        # Read a frame from the camera
+        ret, frame = cap.read()
         
-       if not ret:
-         break
-    ret, buffer = cv2.imencode('.jpg', frame)
-    yield (b'--frame\r\n'b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+        # Check if the frame was successfully read
+        if not ret:
+            break
+        
+        # Encode the frame as JPEG
+        ret, buffer = cv2.imencode('.jpg', frame)
+        
+        # Yield the encoded frame as bytes
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+    
+    # Release the camera capture when done
     cap.release()
 
+# Decorator to compress the response using gzip
 @gzip.gzip_page
-
+# View function for the home page
 def home(request):
     try:
-       
+        # Return a streaming HTTP response with frames from the camera feed
         return StreamingHttpResponse(gen_frames(), content_type="multipart/x-mixed-replace;boundary=frame")
     except Exception as e:
-       
+        # Print an error message if an exception occurs
         print("An error occurred: ", e)
         
+    
 def test(request):
     print("test")
+
                          
    
     
@@ -575,10 +574,6 @@ def motion_detection_event(request):
 
  
 #device management
-
-from django.http import JsonResponse
-from rest_framework.views import APIView
-from onvif import ONVIFCamera
 
 class DeviceManagementView(APIView):
     def get(self, request):
