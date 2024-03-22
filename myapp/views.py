@@ -9,6 +9,7 @@ from django.views.decorators import gzip
 from onvif import ONVIFService
 import cv2
 import numpy as np
+from datetime import datetime, timedelta
 import traceback
 from django.http import HttpResponse
 from django.template.loader import render_to_string
@@ -42,86 +43,31 @@ from zeep import Client
 from onvif.exceptions import ONVIFError
 from django.views.decorators.csrf import csrf_protect
 from .serializers import RTSPUrlSerializer
-from .models import RTSPUrl
 from django.http import JsonResponse
 from onvif import ONVIFCamera
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.http import StreamingHttpResponse
 from onvif import ONVIFCamera, exceptions as onvif_exceptions 
-from myapp.models import Camera, RTSPUrl
 from rest_framework import serializers
-from myapp.models import Camera, RTSPUrl
-
-  
-
-@method_decorator(csrf_exempt, name='dispatch')    
-class GetRTSPUrlView(View):
-    
-    def get(self, request):
-        try:
-            camera_id = request.GET.get('id')
-            if camera_id:
-                try:
-                    camera = Camera.objects.get(id=camera_id)
-                    ip = camera.ip
-                    port = camera.port
-                    username = camera.username
-                    password = camera.password
-
-                    camera_onvif = ONVIFCamera(ip, port, username, password)
-                    media_service = camera_onvif.create_media_service()
-
-                    profiles = media_service.GetProfiles()
-                    if not profiles:
-                        return JsonResponse({'error': 'No media profiles found'}, status=500)
-                    media_profile_token = profiles[0].token
-
-                    stream_setup = {
-                        'Stream': 'RTP-Unicast',
-                        'Transport': {
-                            'Protocol': 'UDP'
-                        }
-                    }
-                    stream_uri_response = media_service.GetStreamUri({
-                        'ProfileToken': media_profile_token,
-                        'StreamSetup': stream_setup
-                    })
-                    if stream_uri_response and hasattr(stream_uri_response, 'Uri'):
-                        rtsp_url = stream_uri_response.Uri
-
-                        rtsp_url_instance = RTSPUrl.objects.create(url=rtsp_url)
-                        rtsp_url_instance.save()
-
-                    
-                        return StreamingHttpResponse(gen(rtsp_url),content_type="multipart/x-mixed-replace;boundary=frame")   
-                    else:
-                        return JsonResponse({'error': 'Failed to retrieve RTSP URL'}, status=500)
-
-                except Camera.DoesNotExist:
-                    return JsonResponse({'error': 'Camera not found'}, status=404)
-                except onvif_exceptions.ONVIFError as e:
-                    return JsonResponse({'error': str(e)}, status=500)
-            else:
-                
-                rtsp_urls = RTSPUrl.objects.all()
-                rtsp_urls_data = serializers.serialize('json', rtsp_urls)
-                return HttpResponse(rtsp_urls_data, content_type="application/json")
-                
-        except Exception as e:
-            return JsonResponse({'error': str(e)}, status=500)
-
-    
-    
+from django.views.decorators.csrf import csrf_exempt
+from onvif import ONVIFCamera
+import cv2
+from django.utils.decorators import method_decorator
+from django.http import JsonResponse
+import subprocess
+from lxml import etree
 
 
-#live streaming 
+
+
+
+# live streaming 
 from django.http import StreamingHttpResponse, HttpResponse
-
-from django.core import serializers
+from myapp.models import Camera
+import cv2
 
 def gen_frames(rtsp_url_with_credentials):
-   
     cap = cv2.VideoCapture(rtsp_url_with_credentials)
     while cap.isOpened():
         ret, frame = cap.read()
@@ -135,33 +81,20 @@ def gen_frames(rtsp_url_with_credentials):
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
     cap.release()
-    
 
 def live_stream(request):
     camera_id = request.GET.get('id')
     if camera_id:
         try:
-            rtsp_url_obj = RTSPUrl.objects.get(id=camera_id)
             camera = Camera.objects.get(id=camera_id)
-        except RTSPUrl.DoesNotExist:
-            return HttpResponse("RTSP URL not found", status=404)
+            rtsp_url = camera.rtsp_url
+            rtsp_url_with_credentials = add_credentials_to_rtsp_url(rtsp_url, camera)
+            print("rtsp_url_with_credentials:", rtsp_url_with_credentials)
+            return StreamingHttpResponse(gen_frames(rtsp_url_with_credentials), content_type="multipart/x-mixed-replace;boundary=frame")
         except Camera.DoesNotExist:
-            
-            cameras = Camera.objects.all()
-            cameras_data = serializers.serialize('json', cameras) 
-            print("cameras_data",cameras_data) 
-            return HttpResponse(cameras_data, content_type="application/json")
+            return HttpResponse("Camera not found", status=404)
     else:
         return HttpResponse("Camera ID not provided", status=400)
-
-    rtsp_url = rtsp_url_obj.url
-    rtsp_url_with_credentials = add_credentials_to_rtsp_url(rtsp_url, camera)
-    response_data = {
-        "rtsp_url_with_credentials": rtsp_url_with_credentials
-    }
-    
-    print("rtsp_url_with_credentials",rtsp_url_with_credentials)
-    return StreamingHttpResponse(gen_frames(rtsp_url_with_credentials), content_type="multipart/x-mixed-replace;boundary=frame")
 
 def add_credentials_to_rtsp_url(rtsp_url, camera):
     username = camera.username
@@ -171,10 +104,10 @@ def add_credentials_to_rtsp_url(rtsp_url, camera):
         return rtsp_url.replace("rtsp://", f"rtsp://{credentials}")
     else:
         raise ValueError("Username or password not provided for the camera")
-    
-    
-# camera models                                      
-                                            
+
+
+
+#camera models
 class CameraListAPIView(APIView):
     
     def get(self, request, pk=None):
@@ -188,24 +121,56 @@ class CameraListAPIView(APIView):
             cameras = Camera.objects.all()
             serializer = CameraSerializer(cameras, many=True)
             return Response(serializer.data)
+    
     def post(self, request):
         data = request.data
+        
+        existing_camera_with_name = Camera.objects.filter(camera_name=data['camera_name']).first()
+        if existing_camera_with_name:
+            return Response({'error': 'A camera with this name already exists.'}, status=status.HTTP_409_CONFLICT)
+        
         serializer = CameraSerializer(data=data)
 
         if serializer.is_valid():
-            existing_camera_with_name = Camera.objects.filter(camera_name=data['camera_name']).first()
+            camera_instance = serializer.save()
+            ip = camera_instance.ip
+            port = camera_instance.port
+            username = camera_instance.username
+            password = camera_instance.password
 
-            if existing_camera_with_name:
-                return Response({'error': 'A camera with this name already exists.'}, status=status.HTTP_409_CONFLICT)
-            else:
-                camera_instance = serializer.save()
+            camera_onvif = ONVIFCamera(ip, port, username, password)
+            media_service = camera_onvif.create_media_service()
+
+            profiles = media_service.GetProfiles()
+            if not profiles:
+                return Response({'error': 'No media profiles found'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            media_profile_token = profiles[0].token
+
+            stream_setup = {
+                'Stream': 'RTP-Unicast',
+                'Transport': {
+                    'Protocol': 'UDP'
+                }
+            }
+            stream_uri_response = media_service.GetStreamUri({
+                'ProfileToken': media_profile_token,
+                'StreamSetup': stream_setup
+            })
+            if stream_uri_response and hasattr(stream_uri_response, 'Uri'):
+                rtsp_url = stream_uri_response.Uri
+                camera_instance.rtsp_url = rtsp_url
+                camera_instance.save()
+                
                 response_data = {
                     "message": "Camera created successfully",
                     "camera": serializer.data
                 }
                 return Response(response_data, status=status.HTTP_201_CREATED)
+            else:
+                return Response({'error': 'Failed to generate RTSP URL'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         else:
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
     
 class CameraDetailAPIView(APIView):
     def get(self, request):
@@ -291,6 +256,112 @@ class DeviceManagementView(APIView):
 
         except Exception as e:
             return Response({'error': str(e)}, status=500)
+
+        
+        
+
+#Device discover
+
+from django.http import JsonResponse
+import subprocess
+
+def discover_devices(request):
+    try:
+        output = subprocess.check_output(['arp', '-a']).decode('utf-8')
+        
+        devices = []
+        device_id_counter = 1  
+
+        for line in output.split('\n'):
+            if 'dynamic' in line.lower():
+                parts = line.split()
+                ip_address = parts[0]
+                mac_address = parts[1]
+
+                
+                device_id = device_id_counter
+                device_id_counter += 1
+
+                devices.append({
+                    'ip_address': ip_address,
+                    'mac_address': mac_address,
+                    'device_id': device_id
+                })
+
+        return JsonResponse({'devices': devices})
+    except subprocess.CalledProcessError as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+
+
+
+
+    
+
+
+
+
+    
+
+
+
+ 
+
+     
+
+
+        
+
+
+        
+
+
+
+
+
+
+
+
+
+
+
+    
+  
+
+
+        
+
+
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
 
 
 
