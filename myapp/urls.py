@@ -2,7 +2,9 @@ from django.urls import path
 from .views import CameraListAPIView,CameraDetailAPIView,CameraUpdateAPIView,CameraDeleteAPIView
 from . import views
 from .views import live_stream
- 
+from django.urls import path
+
+
 
 
 
@@ -15,11 +17,17 @@ urlpatterns = [
     path('live-stream/', live_stream, name='live_stream'),
     path('discover-devices/', views.discover_devices, name='discover_devices'),
     
+
+
+]
+
+    
+    
     
      
     
     
-]
+
     
 
     

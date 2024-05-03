@@ -11,11 +11,9 @@ class Camera(models.Model):
       serial_number = models.CharField(max_length=50,blank=True)
       operation = models.CharField(max_length=50,blank=True)
       status = models.BooleanField(default=True,blank=True)
-      device_model = models.CharField(max_length=50,blank=True)
+      model = models.CharField(max_length=50,blank=True)
       username = models.CharField(max_length=100,blank=True)
       password = models.CharField(max_length=100,blank=True)
-      model = models.CharField(max_length=100,blank=True)
-      serial_number = models.CharField(max_length=100,blank=True)
       firmware_version = models.CharField(max_length=100,blank=True)
       rtsp_url = models.CharField(max_length=5000,blank=True)
 
